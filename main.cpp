@@ -1,132 +1,179 @@
 ﻿#include <iostream>
-#include <memory>
+#include <string>
 
 class VendingMachine;
 
-// Giao dien trang thai
 class State {
 public:
-    virtual void insertCoin(VendingMachine* machine) = 0;
-    virtual void pressButton(VendingMachine* machine) = 0;
+    virtual void insertCoin(VendingMachine* machine, int amount) = 0;
+    virtual void selectProduct(VendingMachine* machine, const std::string& product) = 0;
     virtual void dispense(VendingMachine* machine) = 0;
     virtual ~State() = default;
 };
 
-// Lop may ban hang (Context)
 class VendingMachine {
-private:
-    std::shared_ptr<State> state;
+    State* currentState;
+    int money = 0;
+    int productStock = 1;
+
 public:
+    static State* noCoinState;
+    static State* hasCoinState;
+    static State* soldOutState;
+    static State* dispensingState;
+
     VendingMachine();
 
-    void setState(std::shared_ptr<State> newState) {
-        state = newState;
+    void setState(State* state) { currentState = state; }
+    void insertCoin(int amount) { currentState->insertCoin(this, amount); }
+    void selectProduct(const std::string& product) { currentState->selectProduct(this, product); }
+    void dispense() { currentState->dispense(this); }
+
+    int getMoney() const { return money; }
+    void addMoney(int amount) { money += amount; }
+    void returnChange() {
+        if (money > 0) {
+            std::cout << "Returning change: " << money << " VND\n";
+            money = 0;
+        }
     }
 
-    void insertCoin() {
-        state->insertCoin(this);
-    }
-
-    void pressButton() {
-        state->pressButton(this);
-    }
-
-    void dispense() {
-        state->dispense(this);
-    }
-
-    // Cac trang thai duoc dung chung
-    static std::shared_ptr<State> noCoinState;
-    static std::shared_ptr<State> hasCoinState;
-    static std::shared_ptr<State> soldState;
+    int getStock() const { return productStock; }
+    void decreaseStock() { if (productStock > 0) productStock--; }
 };
 
-
-// Dinh nghia trang thai cu the
 class NoCoinState : public State {
 public:
-    void insertCoin(VendingMachine* machine) override {
-        std::cout << "Coin inserted.\n";
+    void insertCoin(VendingMachine* machine, int amount) override {
+        std::cout << "Received " << amount << " VND.\n";
+        machine->addMoney(amount);
         machine->setState(VendingMachine::hasCoinState);
     }
-    void pressButton(VendingMachine*) override {
+
+    void selectProduct(VendingMachine* machine, const std::string& product) override {
         std::cout << "Please insert coin first.\n";
     }
-    void dispense(VendingMachine*) override {
-        std::cout << "Cannot dispense without coin.\n";
+
+    void dispense(VendingMachine* machine) override {
+        std::cout << "No coin inserted.\n";
     }
 };
 
 class HasCoinState : public State {
 public:
-    void insertCoin(VendingMachine*) override {
-        std::cout << "Coin already inserted.\n";
+    void insertCoin(VendingMachine* machine, int amount) override {
+        std::cout << "Added " << amount << " VND more.\n";
+        machine->addMoney(amount);
     }
-    void pressButton(VendingMachine* machine) override {
-        std::cout << "Button pressed. Preparing to dispense item...\n";
-        machine->setState(VendingMachine::soldState);
-    }
-    void dispense(VendingMachine*) override {
-        std::cout << "Press button to dispense.\n";
-    }
-};
 
-class SoldState : public State {
-public:
-    void insertCoin(VendingMachine*) override {
-        std::cout << "Please wait, dispensing in progress...\n";
+    void selectProduct(VendingMachine* machine, const std::string& product) override {
+        const int price = 10000;
+        std::cout << "Selected product: " << product << "\n";
+
+        if (machine->getMoney() >= price) {
+            int change = machine->getMoney() - price;
+
+            if (change > 0)
+                std::cout << "Dispensing product and returning " << change << " VND change.\n";
+            else
+                std::cout << "Dispensing product...\n";
+
+            machine->addMoney(-price);
+            machine->returnChange();
+            machine->setState(VendingMachine::dispensingState);
+            machine->dispense();
+        }
+        else {
+            std::cout << "Not enough money. Please add more.\n";
+        }
     }
-    void pressButton(VendingMachine*) override {
-        std::cout << "Already dispensing...\n";
-    }
+
     void dispense(VendingMachine* machine) override {
-        std::cout << "Item dispensed.\n";
-        machine->setState(VendingMachine::noCoinState);
+        std::cout << "Please select a product first.\n";
     }
 };
 
+class DispensingState : public State {
+public:
+    void insertCoin(VendingMachine* machine, int amount) override {
+        std::cout << "Currently dispensing. Please wait.\n";
+    }
 
+    void selectProduct(VendingMachine* machine, const std::string& product) override {
+        std::cout << "Currently dispensing. Please wait.\n";
+    }
 
+    void dispense(VendingMachine* machine) override {
+        machine->decreaseStock();
+        std::cout << "Product dispensed. Thank you!\n";
 
+        if (machine->getStock() == 0) {
+            machine->setState(VendingMachine::soldOutState);
+        }
+        else {
+            machine->setState(VendingMachine::noCoinState);
+        }
+    }
+};
 
+class SoldOutState : public State {
+public:
+    void insertCoin(VendingMachine* machine, int amount) override {
+        std::cout << "Sold out. Cannot accept money.\n";
+    }
 
-// Khoi tao trang thai tĩnh
-std::shared_ptr<State> VendingMachine::noCoinState = std::make_shared<NoCoinState>();
-std::shared_ptr<State> VendingMachine::hasCoinState = std::make_shared<HasCoinState>();
-std::shared_ptr<State> VendingMachine::soldState = std::make_shared<SoldState>();
-// Constructor
+    void selectProduct(VendingMachine* machine, const std::string& product) override {
+        std::cout << "Sold out. No product available.\n";
+    }
+
+    void dispense(VendingMachine* machine) override {
+        std::cout << "Sold out.\n";
+    }
+};
+
+// Initialize static members
+State* VendingMachine::noCoinState = new NoCoinState();
+State* VendingMachine::hasCoinState = new HasCoinState();
+State* VendingMachine::soldOutState = new SoldOutState();
+State* VendingMachine::dispensingState = new DispensingState();
+
 VendingMachine::VendingMachine() {
-    state = noCoinState;
+    currentState = productStock > 0 ? noCoinState : soldOutState;
 }
+
+// -------------------------- MAIN -----------------------------
+
 int main() {
-    VendingMachine machine;
+    VendingMachine vm;
 
-    std::cout << "=== Test 1: Nhan nut khi chua dua xu ===\n";
-    machine.pressButton();   // Should print: Please insert coin first
+    std::cout << "\n---> [1] Test NoCoinState (Chưa nhận tiền):\n";
+    vm.selectProduct("Pepsi"); // Không được phép chọn món
+    vm.dispense();             // Không có tác dụng
 
-    std::cout << "\n=== Test 2: Dua xu, nhan nut, nhan hang ===\n";
-    machine.insertCoin();    // Should print: Coin inserted
-    machine.pressButton();   // Should print: Button pressed...
-    machine.dispense();      // Should print: Item dispensed
+    std::cout << "\n---> [2] Test HasCoinState (Đã nhận tiền):\n";
+    vm.insertCoin(7000);       // Chưa đủ tiền
+    vm.selectProduct("Pepsi"); // Không đủ tiền
 
-    std::cout << "\n=== Test 3: Dua xu 2 lan lien tiep ===\n";
-    machine.insertCoin();    // Should print: Coin inserted
-    machine.insertCoin();    // Should print: Coin already inserted
-    machine.pressButton();   // Should print: Button pressed...
-    machine.dispense();      // Should print: Item dispensed
+    vm.insertCoin(5000);       // Tổng đủ tiền
+    vm.selectProduct("Pepsi"); // Sẽ phân phối sản phẩm
 
-    std::cout << "\n=== Test 4: Nhan nut nhieu lan lien tiep khong dua xu ===\n";
-    machine.pressButton();   // Should print: Please insert coin first
-    machine.pressButton();   // Should print: Please insert coin first
+    std::cout << "\n---> [3] Test DispensingState (Đang phân phối):\n";
+    vm.insertCoin(5000);       // Bị từ chối vì đang giao hàng
+    vm.selectProduct("Pepsi"); // Bị từ chối
+    // Tự động chuyển về NoCoin hoặc SoldOut sau dispense
 
-    std::cout << "\n=== Test 5: Dua xu -> nhan nut -> khong goi dispense ===\n";
-    machine.insertCoin();    // Should print: Coin inserted
-    machine.pressButton();   // Should print: Button pressed...
-    machine.insertCoin();    // Should print: Please wait, dispensing...
-    machine.pressButton();   // Should print: Already dispensing...
-    machine.dispense();      // Should print: Item dispensed
+    std::cout << "\n---> [4] Test HasCoinState tiếp tục mua hàng:\n";
+    vm.insertCoin(10000);      // Trạng thái HasCoin
+    vm.selectProduct("Pepsi"); // Mua lần thứ 2
+
+    std::cout << "\n---> [5] Test SoldOutState (Hết hàng):\n";
+    vm.insertCoin(5000);       // Không nhận
+    vm.selectProduct("Pepsi"); // Không xử lý
+
+    std::cout << "\n---> [6] Test sau khi hết hàng:\n";
+    vm.insertCoin(10000);      // Không nhận
+    vm.selectProduct("Pepsi"); // Không xử lý
 
     return 0;
 }
 
- 
